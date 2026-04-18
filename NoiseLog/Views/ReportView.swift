@@ -9,11 +9,11 @@ struct ReportView: View {
     /// 表示中の年月
     @State private var selectedDate: Date = .now
 
-    /// PDF共有シート表示フラグ
+    /// 共有シート表示フラグ
     @State private var showShareSheet: Bool = false
 
-    /// 共有用PDFデータ
-    @State private var pdfData: Data?
+    /// 共有アイテム（PDF + 音声ファイル）
+    @State private var shareItems: [Any] = []
 
     /// 購入シート表示フラグ
     @State private var showSubscriptionSheet: Bool = false
@@ -126,10 +126,8 @@ struct ReportView: View {
             .navigationTitle("レポート")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
-            .sheet(isPresented: $showShareSheet) {
-                if let data = pdfData {
-                    ShareSheet(items: [data])
-                }
+            .sheet(isPresented: $showShareSheet, onDismiss: cleanupTempFiles) {
+                ShareSheet(items: shareItems)
             }
             .sheet(isPresented: $showSubscriptionSheet) {
                 SubscriptionSheetView()
@@ -256,7 +254,7 @@ struct ReportView: View {
     private var pdfExportButton: some View {
         Button {
             if subscriptionManager.isSubscribed {
-                pdfData = generatePDF()
+                shareItems = prepareShareItems()
                 showShareSheet = true
             } else {
                 showSubscriptionSheet = true
@@ -264,7 +262,7 @@ struct ReportView: View {
         } label: {
             HStack {
                 Image(systemName: "doc.richtext")
-                Text("PDFレポートを出力")
+                Text("PDF+音声を出力")
                     .fontWeight(.bold)
             }
             .font(.body)
@@ -274,6 +272,50 @@ struct ReportView: View {
             .foregroundColor(.black)
             .cornerRadius(12)
         }
+    }
+
+    /// PDF + 音声ファイルの共有アイテムを準備
+    private func prepareShareItems() -> [Any] {
+        var items: [Any] = []
+
+        // PDF生成
+        let pdf = generatePDF()
+        let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent("NoiseLogExport", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+
+        let pdfURL = tmpDir.appendingPathComponent("騒音ログ_\(monthTitle).pdf")
+        try? pdf.write(to: pdfURL)
+        items.append(pdfURL)
+
+        // 音声ファイル収集
+        let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "ja_JP")
+        dateFormatter.dateFormat = "yyyy-MM-dd_HHmm"
+
+        for record in monthlyRecords {
+            guard let audioPath = record.audioFilePath, !audioPath.isEmpty else { continue }
+            let sourceURL = documentsDir.appendingPathComponent(audioPath)
+            guard FileManager.default.fileExists(atPath: sourceURL.path) else { continue }
+
+            let dateStr = dateFormatter.string(from: record.timestamp)
+            let dbStr = String(format: "%.0f", record.decibelLevel)
+            let exportName = "\(dateStr)_\(dbStr)dB.m4a"
+            let destURL = tmpDir.appendingPathComponent(exportName)
+
+            try? FileManager.default.removeItem(at: destURL)
+            try? FileManager.default.copyItem(at: sourceURL, to: destURL)
+            items.append(destURL)
+        }
+
+        return items
+    }
+
+    /// 一時ファイルのクリーンアップ
+    private func cleanupTempFiles() {
+        let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent("NoiseLogExport", isDirectory: true)
+        try? FileManager.default.removeItem(at: tmpDir)
+        shareItems = []
     }
 
     /// PDFデータを生成する

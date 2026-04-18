@@ -3,7 +3,7 @@ import Combine
 
 /// マイクからリアルタイムでデシベル値を取得するマネージャー
 final class AudioManager: ObservableObject {
-    /// 現在のデシベル値
+    /// 表示用のデシベル値（スムージング済み・500ms更新）
     @Published var currentDecibel: Double = 0.0
 
     /// 測定中かどうか
@@ -21,12 +21,24 @@ final class AudioManager: ObservableObject {
     /// マイク権限の状態
     @Published var permissionGranted: Bool = false
 
+    /// 内部の生デシベル値（高頻度更新）
+    private var rawDecibel: Double = 0.0
+
+    /// 録音中のピークdB値
+    @Published var peakDecibel: Double = 0.0
+
+    /// 表示更新用タイマー
+    private var displayTimer: Timer?
+
+    /// スムージング係数（0〜1、小さいほど滑らか）
+    private let smoothingFactor: Double = 0.3
+
     private var audioEngine: AVAudioEngine?
     private var audioRecorder: AVAudioRecorder?
     private var recordingTimer: Timer?
 
     /// 録音の最大秒数
-    private let maxRecordingDuration: Int = 60
+    private let maxRecordingDuration: Int = 300
 
     init() {
         checkPermission()
@@ -36,13 +48,13 @@ final class AudioManager: ObservableObject {
 
     /// マイク使用権限を確認する
     func checkPermission() {
-        switch AVAudioSession.sharedInstance().recordPermission {
+        switch AVAudioApplication.shared.recordPermission {
         case .granted:
             permissionGranted = true
         case .denied:
             permissionGranted = false
         case .undetermined:
-            AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
+            AVAudioApplication.requestRecordPermission { [weak self] granted in
                 DispatchQueue.main.async {
                     self?.permissionGranted = granted
                 }
@@ -103,7 +115,11 @@ final class AudioManager: ObservableObject {
             }
 
             DispatchQueue.main.async {
-                self?.currentDecibel = db
+                guard let self = self else { return }
+                self.rawDecibel = db
+                if self.isRecording, db > self.peakDecibel {
+                    self.peakDecibel = db
+                }
             }
         }
 
@@ -111,6 +127,7 @@ final class AudioManager: ObservableObject {
             try audioEngine.start()
             self.audioEngine = audioEngine
             isMonitoring = true
+            startDisplayTimer()
         } catch {
             inputNode.removeTap(onBus: 0)
         }
@@ -118,11 +135,24 @@ final class AudioManager: ObservableObject {
 
     /// リアルタイム測定を停止する
     func stopMonitoring() {
+        displayTimer?.invalidate()
+        displayTimer = nil
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
         isMonitoring = false
         currentDecibel = 0
+        rawDecibel = 0
+    }
+
+    /// 表示用タイマー（500ms間隔でスムージング済みの値を反映）
+    private func startDisplayTimer() {
+        displayTimer?.invalidate()
+        displayTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            let smoothed = self.currentDecibel + self.smoothingFactor * (self.rawDecibel - self.currentDecibel)
+            self.currentDecibel = smoothed
+        }
     }
 
     // MARK: - 録音
@@ -153,6 +183,7 @@ final class AudioManager: ObservableObject {
             audioRecorder?.record()
             isRecording = true
             recordingElapsed = 0
+            peakDecibel = rawDecibel
 
             // タイマーでカウントアップ、最大秒数で自動停止
             recordingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
@@ -184,6 +215,7 @@ final class AudioManager: ObservableObject {
     }
 
     deinit {
+        displayTimer?.invalidate()
         stopMonitoring()
         stopRecording()
     }
