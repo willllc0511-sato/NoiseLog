@@ -5,7 +5,7 @@ import UserNotifications
 /// 設定画面：通知リマインド、サブスクリプション、プライバシーポリシー、お問い合わせ等
 struct SettingsView: View {
     /// サブスクリプション管理
-    @StateObject private var subscriptionManager = SubscriptionManager.shared
+    @ObservedObject private var subscriptionManager = SubscriptionManager.shared
 
     /// リマインド通知のON/OFF
     @AppStorage("reminderEnabled") private var reminderEnabled: Bool = false
@@ -34,8 +34,10 @@ struct SettingsView: View {
                     .ignoresSafeArea()
 
                 List {
-                    // サブスクリプションセクション
-                    subscriptionSection
+                    // サブスクリプションセクション（product取得済み or 加入済みの場合のみ表示）
+                    if subscriptionManager.isSubscribed || subscriptionManager.product != nil {
+                        subscriptionSection
+                    }
 
                     // 通知設定セクション
                     notificationSection
@@ -58,6 +60,10 @@ struct SettingsView: View {
                 components.hour = reminderHour
                 components.minute = reminderMinute
                 reminderTime = Calendar.current.date(from: components) ?? Date()
+                // プロダクト未取得ならバックグラウンドで取得試行
+                if subscriptionManager.product == nil {
+                    Task { await subscriptionManager.loadProduct() }
+                }
             }
             .alert("通知が許可されていません", isPresented: $showPermissionAlert) {
                 Button("設定を開く") {
@@ -79,57 +85,74 @@ struct SettingsView: View {
     /// サブスクリプション管理セクション
     private var subscriptionSection: some View {
         Section {
-            // ステータス表示
-            HStack {
-                HStack(spacing: 12) {
-                    Image(systemName: subscriptionManager.isSubscribed ? "crown.fill" : "crown")
-                        .foregroundColor(AppTheme.accentYellow)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("プレミアムプラン")
-                            .foregroundColor(.white)
-                        if subscriptionManager.isSubscribed {
-                            Text(subscriptionManager.isInTrial ? "無料トライアル中" : "有効")
+            // ステータス表示（未加入時はタップで購入）
+            if subscriptionManager.isSubscribed {
+                HStack {
+                    HStack(spacing: 12) {
+                        Image(systemName: "crown.fill")
+                            .foregroundColor(AppTheme.accentYellow)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("ご利用プラン")
+                                .foregroundColor(.white)
+                            Text("有効")
                                 .font(.caption)
                                 .foregroundColor(AppTheme.accentGreen)
-                        } else {
-                            Text("未加入")
-                                .font(.caption)
-                                .foregroundColor(.gray)
                         }
                     }
+                    Spacer()
                 }
-                Spacer()
-            }
-            .listRowBackground(AppTheme.cardBackground)
-
-            // 未加入の場合：購入ボタン
-            if !subscriptionManager.isSubscribed {
-                if let product = subscriptionManager.product {
-                    Button {
-                        Task { await subscriptionManager.purchase() }
-                    } label: {
-                        HStack {
-                            Spacer()
-                            if subscriptionManager.isPurchasing {
-                                ProgressView()
-                                    .tint(.white)
-                            } else {
-                                VStack(spacing: 4) {
-                                    Text("7日間無料で始める")
-                                        .font(.headline)
-                                        .foregroundColor(.white)
-                                    Text("その後 \(product.displayPrice)/月")
-                                        .font(.caption)
-                                        .foregroundColor(.white.opacity(0.7))
-                                }
+                .listRowBackground(AppTheme.cardBackground)
+            } else {
+                // 未加入：ステータス行もタップで購入可能
+                Button {
+                    Task { await purchaseOrReload() }
+                } label: {
+                    HStack {
+                        HStack(spacing: 12) {
+                            Image(systemName: "crown")
+                                .foregroundColor(AppTheme.accentYellow)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("ご利用プラン")
+                                    .foregroundColor(.white)
+                                Text("未加入")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
                             }
-                            Spacer()
                         }
-                        .padding(.vertical, 8)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.gray)
                     }
-                    .disabled(subscriptionManager.isPurchasing)
-                    .listRowBackground(AppTheme.accentYellow.opacity(0.9))
                 }
+                .listRowBackground(AppTheme.cardBackground)
+
+                // 購入ボタン
+                Button {
+                    Task {
+                        if subscriptionManager.product != nil {
+                            await subscriptionManager.purchase()
+                        } else {
+                            await subscriptionManager.loadProduct()
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if subscriptionManager.isPurchasing {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Text(settingsPriceButtonText)
+                                .font(.headline)
+                                .foregroundColor(.white)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                }
+                .disabled(subscriptionManager.isPurchasing)
+                .listRowBackground(AppTheme.accentYellow.opacity(0.9))
 
                 // 復元ボタン
                 Button {
@@ -145,21 +168,31 @@ struct SettingsView: View {
                 .listRowBackground(AppTheme.cardBackground)
             }
 
-            // エラー表示
-            if let error = subscriptionManager.errorMessage {
-                Text(error)
-                    .font(.caption)
-                    .foregroundColor(AppTheme.accentRed)
-                    .listRowBackground(AppTheme.cardBackground)
-            }
         } header: {
             Text("サブスクリプション")
                 .foregroundColor(.gray)
         } footer: {
             if !subscriptionManager.isSubscribed {
-                Text("プレミアムプランに加入すると、録音・記録保存の制限が解除されます。7日間の無料トライアル付き。")
+                Text("ご利用プランに加入すると、録音・記録保存の制限が解除されます。")
                     .foregroundColor(.gray)
             }
+        }
+    }
+
+    /// 購入ボタンの表示テキスト
+    private var settingsPriceButtonText: String {
+        if let product = subscriptionManager.product {
+            return "\(product.displayPrice)/月 で購入"
+        }
+        return "購入"
+    }
+
+    /// 購入処理
+    private func purchaseOrReload() async {
+        if subscriptionManager.product != nil {
+            await subscriptionManager.purchase()
+        } else {
+            await subscriptionManager.loadProduct()
         }
     }
 
@@ -222,11 +255,26 @@ struct SettingsView: View {
     private var supportSection: some View {
         Section {
             // プライバシーポリシー
-            Link(destination: URL(string: "https://will-llc.co.jp/privacy")!) {
+            Link(destination: URL(string: "https://willllc0511-sato.github.io/NoiseLog/privacy-policy.html")!) {
                 HStack(spacing: 12) {
                     Image(systemName: "hand.raised.fill")
                         .foregroundColor(AppTheme.accentYellow)
                     Text("プライバシーポリシー")
+                        .foregroundColor(.white)
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+            }
+            .listRowBackground(AppTheme.cardBackground)
+
+            // 利用規約
+            Link(destination: URL(string: "https://willllc0511-sato.github.io/NoiseLog/terms.html")!) {
+                HStack(spacing: 12) {
+                    Image(systemName: "doc.plaintext.fill")
+                        .foregroundColor(AppTheme.accentYellow)
+                    Text("利用規約")
                         .foregroundColor(.white)
                     Spacer()
                     Image(systemName: "arrow.up.right")
