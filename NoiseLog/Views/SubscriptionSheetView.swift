@@ -40,75 +40,39 @@ struct SubscriptionSheetView: View {
                                 .fill(AppTheme.cardBackground)
                         )
 
-                        if subscriptionManager.isLoadingProduct {
-                            ProgressView()
-                                .tint(AppTheme.accentYellow)
-                                .padding(.vertical, 20)
-                        } else {
-                            // 価格
-                            Text(priceText)
-                                .font(.title.bold())
-                                .foregroundColor(.white)
+                        // 価格
+                        Text(priceText)
+                            .font(.title.bold())
+                            .foregroundColor(.white)
 
-                            // 購入ボタン
-                            Button {
-                                Task {
-                                    if subscriptionManager.product == nil {
-                                        await subscriptionManager.loadProduct()
-                                    }
-                                    if subscriptionManager.product != nil {
-                                        await subscriptionManager.purchase()
-                                        if subscriptionManager.isSubscribed {
-                                            dismiss()
-                                        }
-                                    }
-                                }
-                            } label: {
-                                HStack {
-                                    Spacer()
-                                    if subscriptionManager.isPurchasing {
-                                        ProgressView().tint(.white)
-                                    } else {
-                                        Text("\(priceText)で購入")
-                                            .font(.headline)
-                                            .foregroundColor(.white)
-                                    }
-                                    Spacer()
-                                }
-                                .padding(.vertical, 16)
-                            }
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(AppTheme.accentYellow.opacity(0.9))
-                            )
-                            .disabled(subscriptionManager.isPurchasing)
+                        // 購入ボタン or ローディング or タイムアウト
+                        purchaseArea
 
-                            VStack(spacing: 4) {
-                                Text("サブスクリプションはいつでもキャンセルできます。")
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                                    .multilineTextAlignment(.center)
-                                HStack(spacing: 12) {
-                                    Link("利用規約", destination: URL(string: "https://willllc0511-sato.github.io/NoiseLog/terms.html")!)
-                                    Link("プライバシーポリシー", destination: URL(string: "https://willllc0511-sato.github.io/NoiseLog/privacy-policy.html")!)
-                                }
+                        VStack(spacing: 4) {
+                            Text("サブスクリプションはいつでもキャンセルできます。")
                                 .font(.caption)
-                                .foregroundColor(AppTheme.accentYellow.opacity(0.8))
+                                .foregroundColor(.gray)
+                                .multilineTextAlignment(.center)
+                            HStack(spacing: 12) {
+                                Link("利用規約", destination: URL(string: "https://willllc0511-sato.github.io/NoiseLog/terms.html")!)
+                                Link("プライバシーポリシー", destination: URL(string: "https://willllc0511-sato.github.io/NoiseLog/privacy-policy.html")!)
                             }
+                            .font(.caption)
+                            .foregroundColor(AppTheme.accentYellow.opacity(0.8))
+                        }
 
-                            // 復元
-                            Button {
-                                Task {
-                                    _ = await subscriptionManager.restoreWithResult()
-                                    if subscriptionManager.isSubscribed {
-                                        dismiss()
-                                    }
+                        // 復元
+                        Button {
+                            Task {
+                                _ = await subscriptionManager.restoreWithResult()
+                                if subscriptionManager.isSubscribed {
+                                    dismiss()
                                 }
-                            } label: {
-                                Text("購入を復元")
-                                    .font(.subheadline)
-                                    .foregroundColor(AppTheme.accentYellow)
                             }
+                        } label: {
+                            Text("購入を復元")
+                                .font(.subheadline)
+                                .foregroundColor(AppTheme.accentYellow)
                         }
                     }
                     .padding(.horizontal, 24)
@@ -128,7 +92,104 @@ struct SubscriptionSheetView: View {
         }
     }
 
-    /// 価格テキスト（StoreKit取得済みならその価格、未取得ならフォールバック）
+    // MARK: - 購入エリア（ボタン / ローディング / タイムアウト）
+
+    @ViewBuilder
+    private var purchaseArea: some View {
+        if subscriptionManager.isLoadingProduct {
+            // 読み込み中：ボタンの位置にローディング表示
+            HStack {
+                Spacer()
+                ProgressView()
+                    .tint(.white)
+                Text("読み込み中...")
+                    .font(.headline)
+                    .foregroundColor(.white.opacity(0.7))
+                Spacer()
+            }
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(AppTheme.accentYellow.opacity(0.4))
+            )
+        } else if subscriptionManager.product == nil && subscriptionManager.loadProductTimedOut {
+            // タイムアウト：エラーメッセージ + 再読み込みボタン
+            VStack(spacing: 12) {
+                Button {
+                    Task {
+                        await subscriptionManager.loadProduct()
+                        if subscriptionManager.product != nil {
+                            await subscriptionManager.purchase()
+                            if subscriptionManager.isSubscribed {
+                                dismiss()
+                            }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Spacer()
+                        Text("\(priceText)で購入")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        Spacer()
+                    }
+                    .padding(.vertical, 16)
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(AppTheme.accentYellow.opacity(0.9))
+                )
+
+                Text("通信環境をご確認の上、時間をおいて再度お試しください")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+
+                Button {
+                    Task { await subscriptionManager.loadProduct() }
+                } label: {
+                    Text("再読み込み")
+                        .font(.caption)
+                        .foregroundColor(AppTheme.accentYellow)
+                }
+            }
+        } else {
+            // 購入ボタン
+            Button {
+                Task {
+                    if subscriptionManager.product == nil {
+                        await subscriptionManager.loadProduct()
+                    }
+                    if subscriptionManager.product != nil {
+                        await subscriptionManager.purchase()
+                        if subscriptionManager.isSubscribed {
+                            dismiss()
+                        }
+                    }
+                }
+            } label: {
+                HStack {
+                    Spacer()
+                    if subscriptionManager.isPurchasing {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text("\(priceText)で購入")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 16)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(AppTheme.accentYellow.opacity(0.9))
+            )
+            .disabled(subscriptionManager.isPurchasing)
+        }
+    }
+
+    /// 価格テキスト
     private var priceText: String {
         if let product = subscriptionManager.product {
             return "\(product.displayPrice) / 月（税込）"

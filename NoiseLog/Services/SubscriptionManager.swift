@@ -30,6 +30,9 @@ final class SubscriptionManager: ObservableObject {
     /// プロダクト読み込み中フラグ
     @Published private(set) var isLoadingProduct: Bool = false
 
+    /// 商品取得がタイムアウトしたフラグ
+    @Published private(set) var loadProductTimedOut: Bool = false
+
     /// トランザクション監視タスク
     private var transactionListener: Task<Void, Never>?
 
@@ -45,25 +48,56 @@ final class SubscriptionManager: ObservableObject {
         transactionListener?.cancel()
     }
 
-    // MARK: - プロダクト読み込み（リトライ付き）
+    // MARK: - プロダクト読み込み（10秒タイムアウト）
 
-    /// App Store からプロダクト情報を取得（最大3回リトライ、指数バックオフ）
+    /// App Store からプロダクト情報を取得（最大3回リトライ、全体10秒タイムアウト）
     func loadProduct() async {
+        guard !isLoadingProduct else { return }
         isLoadingProduct = true
-        for attempt in 0..<3 {
-            do {
-                let products = try await Product.products(for: [Self.monthlyProductID])
-                if let first = products.first {
-                    product = first
-                    isLoadingProduct = false
-                    return
+        loadProductTimedOut = false
+
+        let result = await withTaskGroup(of: Product?.self) { group -> Product? in
+            // リトライタスク
+            group.addTask {
+                for attempt in 0..<3 {
+                    do {
+                        let products = try await Product.products(for: [Self.monthlyProductID])
+                        if let first = products.first {
+                            return first
+                        }
+                    } catch {
+                        // リトライ
+                    }
+                    if attempt < 2 {
+                        try? await Task.sleep(nanoseconds: UInt64(pow(2.0, Double(attempt))) * 1_000_000_000)
+                    }
                 }
-            } catch {
-                // リトライ
+                return nil
             }
-            if attempt < 2 {
-                try? await Task.sleep(nanoseconds: UInt64(pow(2.0, Double(attempt))) * 1_000_000_000)
+
+            // タイムアウトタスク（10秒）
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                return nil
             }
+
+            // 最初に返ったものを採用
+            var result: Product?
+            for await value in group {
+                if let v = value {
+                    result = v
+                    group.cancelAll()
+                    break
+                }
+            }
+            group.cancelAll()
+            return result
+        }
+
+        if let result {
+            product = result
+        } else {
+            loadProductTimedOut = true
         }
         isLoadingProduct = false
     }
@@ -138,7 +172,6 @@ final class SubscriptionManager: ObservableObject {
 
     // MARK: - トランザクション監視
 
-    /// バックグラウンドでトランザクションの変化を監視する
     private func listenForTransactions() -> Task<Void, Never> {
         Task.detached { [weak self] in
             for await result in Transaction.updates {
@@ -151,7 +184,6 @@ final class SubscriptionManager: ObservableObject {
 
     // MARK: - 検証
 
-    /// トランザクションの署名を検証する
     private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
         switch result {
         case .unverified:
