@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 購入シート — アラートから直接表示する購入画面
+/// 購入シート — 設定画面やレポート画面から表示する購入画面
 struct SubscriptionSheetView: View {
     @EnvironmentObject private var subscriptionManager: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
@@ -30,6 +30,8 @@ struct SubscriptionSheetView: View {
                             Divider().overlay(Color.gray.opacity(0.3))
                             featureRow(icon: "list.bullet", title: "記録保存", description: "騒音記録を無制限に保存")
                             Divider().overlay(Color.gray.opacity(0.3))
+                            featureRow(icon: "doc.richtext", title: "PDF出力", description: "月次レポートをPDFで出力・共有")
+                            Divider().overlay(Color.gray.opacity(0.3))
                             featureRow(icon: "chart.bar.fill", title: "レポート", description: "騒音データをグラフで可視化")
                         }
                         .padding(16)
@@ -43,7 +45,7 @@ struct SubscriptionSheetView: View {
                                 .tint(AppTheme.accentYellow)
                                 .padding(.vertical, 20)
                         } else {
-                            // 価格（product取得済みならStoreKit価格、未取得ならフォールバック）
+                            // 価格
                             Text(priceText)
                                 .font(.title.bold())
                                 .foregroundColor(.white)
@@ -96,7 +98,12 @@ struct SubscriptionSheetView: View {
 
                             // 復元
                             Button {
-                                Task { await subscriptionManager.restore() }
+                                Task {
+                                    _ = await subscriptionManager.restoreWithResult()
+                                    if subscriptionManager.isSubscribed {
+                                        dismiss()
+                                    }
+                                }
                             } label: {
                                 Text("購入を復元")
                                     .font(.subheadline)
@@ -117,18 +124,16 @@ struct SubscriptionSheetView: View {
             }
         }
         .onAppear {
-            if subscriptionManager.product == nil {
-                Task { await subscriptionManager.loadProduct() }
-            }
+            Task { await subscriptionManager.loadProduct() }
         }
     }
 
-    /// 価格テキスト
+    /// 価格テキスト（StoreKit取得済みならその価格、未取得ならフォールバック）
     private var priceText: String {
         if let product = subscriptionManager.product {
-            return "\(product.displayPrice) / 月"
+            return "\(product.displayPrice) / 月（税込）"
         }
-        return "月額200円"
+        return "月額200円（税込）"
     }
 
     private func featureRow(icon: String, title: String, description: String) -> some View {

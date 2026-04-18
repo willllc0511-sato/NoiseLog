@@ -4,6 +4,7 @@ import SwiftData
 /// レポート画面：月次の騒音記録統計を表示
 struct ReportView: View {
     @Query(sort: \NoiseRecord.timestamp, order: .reverse) private var allRecords: [NoiseRecord]
+    @ObservedObject private var subscriptionManager = SubscriptionManager.shared
 
     /// 表示中の年月
     @State private var selectedDate: Date = .now
@@ -13,6 +14,9 @@ struct ReportView: View {
 
     /// 共有用PDFデータ
     @State private var pdfData: Data?
+
+    /// 購入シート表示フラグ
+    @State private var showSubscriptionSheet: Bool = false
 
     private var calendar: Calendar { Calendar.current }
 
@@ -38,6 +42,11 @@ struct ReportView: View {
     /// 最大dB値
     private var maxDecibel: Double {
         DemoMode.isEnabled ? 78 : (monthlyRecords.map(\.decibelLevel).max() ?? 0)
+    }
+
+    /// 最小dB値
+    private var minDecibel: Double {
+        DemoMode.isEnabled ? 32 : (monthlyRecords.map(\.decibelLevel).min() ?? 0)
     }
 
     /// 時間帯別の平均dB値（0〜23時）
@@ -122,12 +131,15 @@ struct ReportView: View {
                     ShareSheet(items: [data])
                 }
             }
+            .sheet(isPresented: $showSubscriptionSheet) {
+                SubscriptionSheetView()
+                    .environmentObject(subscriptionManager)
+            }
         }
     }
 
     // MARK: - 月切り替え
 
-    /// 前月・翌月の切り替えUI
     private var monthSelector: some View {
         HStack {
             Button {
@@ -160,7 +172,6 @@ struct ReportView: View {
 
     // MARK: - 空の状態
 
-    /// 記録がない月のプレースホルダー
     private var emptyState: some View {
         VStack(spacing: 16) {
             Spacer().frame(height: 60)
@@ -176,7 +187,6 @@ struct ReportView: View {
 
     // MARK: - サマリーカード
 
-    /// 記録件数・平均dB・最大dBのカード表示
     private var summaryCards: some View {
         HStack(spacing: 12) {
             StatCard(title: "記録件数", value: "\(recordCount)", unit: "件", color: AppTheme.accentYellow)
@@ -187,23 +197,19 @@ struct ReportView: View {
 
     // MARK: - 時間帯別グラフ
 
-    /// 時間帯別の棒グラフ
     private var hourlyChart: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("時間帯別の騒音レベル")
                 .font(.headline)
                 .foregroundColor(.white)
 
-            // 棒グラフ
             HStack(alignment: .bottom, spacing: 2) {
                 ForEach(hourlyAverages) { data in
                     VStack(spacing: 4) {
-                        // 棒
                         RoundedRectangle(cornerRadius: 2)
                             .fill(data.averageDecibel > 0 ? AppTheme.colorForDecibel(data.averageDecibel) : Color.gray.opacity(0.2))
                             .frame(height: barHeight(for: data.averageDecibel))
 
-                        // 時間ラベル（6時間ごとに表示）
                         if data.hour % 6 == 0 {
                             Text("\(data.hour)")
                                 .font(.system(size: 10))
@@ -218,7 +224,6 @@ struct ReportView: View {
             }
             .frame(height: 160)
 
-            // 凡例
             HStack(spacing: 16) {
                 legendItem(color: AppTheme.accentGreen, label: "〜40dB 静か")
                 legendItem(color: AppTheme.accentYellow, label: "40〜60dB 普通")
@@ -231,13 +236,11 @@ struct ReportView: View {
         .cornerRadius(16)
     }
 
-    /// 棒グラフの高さを計算（最大120pt）
     private func barHeight(for db: Double) -> CGFloat {
         guard db > 0 else { return 4 }
         return CGFloat(min(db / 100.0 * 120, 120))
     }
 
-    /// 凡例アイテム
     private func legendItem(color: Color, label: String) -> some View {
         HStack(spacing: 4) {
             Circle()
@@ -250,11 +253,14 @@ struct ReportView: View {
 
     // MARK: - PDF出力
 
-    /// PDF出力ボタン
     private var pdfExportButton: some View {
         Button {
-            pdfData = generatePDF()
-            showShareSheet = true
+            if subscriptionManager.isSubscribed {
+                pdfData = generatePDF()
+                showShareSheet = true
+            } else {
+                showSubscriptionSheet = true
+            }
         } label: {
             HStack {
                 Image(systemName: "doc.richtext")
@@ -272,8 +278,8 @@ struct ReportView: View {
 
     /// PDFデータを生成する
     private func generatePDF() -> Data {
-        let pageWidth: CGFloat = 595.0  // A4幅
-        let pageHeight: CGFloat = 842.0 // A4高さ
+        let pageWidth: CGFloat = 595.0
+        let pageHeight: CGFloat = 842.0
         let margin: CGFloat = 40.0
         let contentWidth = pageWidth - margin * 2
 
@@ -288,27 +294,22 @@ struct ReportView: View {
                 .font: UIFont.boldSystemFont(ofSize: 24),
                 .foregroundColor: UIColor.black
             ]
-            let title = "騒音ログ 月次レポート"
-            title.draw(at: CGPoint(x: margin, y: y), withAttributes: titleAttrs)
+            "騒音ログ 月次レポート".draw(at: CGPoint(x: margin, y: y), withAttributes: titleAttrs)
             y += 40
 
-            // 対象月
+            // 対象期間
             let subtitleAttrs: [NSAttributedString.Key: Any] = [
                 .font: UIFont.systemFont(ofSize: 16),
                 .foregroundColor: UIColor.darkGray
             ]
-            monthTitle.draw(at: CGPoint(x: margin, y: y), withAttributes: subtitleAttrs)
+            "対象期間：\(monthTitle)".draw(at: CGPoint(x: margin, y: y), withAttributes: subtitleAttrs)
             y += 30
 
             // 区切り線
-            let linePath = UIBezierPath()
-            linePath.move(to: CGPoint(x: margin, y: y))
-            linePath.addLine(to: CGPoint(x: pageWidth - margin, y: y))
-            UIColor.gray.setStroke()
-            linePath.stroke()
+            drawLine(at: y, from: margin, to: pageWidth - margin)
             y += 20
 
-            // サマリー
+            // 統計情報
             let bodyAttrs: [NSAttributedString.Key: Any] = [
                 .font: UIFont.systemFont(ofSize: 14),
                 .foregroundColor: UIColor.black
@@ -316,7 +317,8 @@ struct ReportView: View {
             let summaryLines = [
                 "記録件数：\(recordCount) 件",
                 "平均騒音レベル：\(String(format: "%.1f", averageDecibel)) dB",
-                "最大騒音レベル：\(String(format: "%.1f", maxDecibel)) dB"
+                "最大騒音レベル：\(String(format: "%.1f", maxDecibel)) dB",
+                "最小騒音レベル：\(String(format: "%.1f", minDecibel)) dB"
             ]
             for line in summaryLines {
                 line.draw(at: CGPoint(x: margin, y: y), withAttributes: bodyAttrs)
@@ -324,9 +326,55 @@ struct ReportView: View {
             }
             y += 16
 
+            // 時間帯別グラフ
+            let sectionTitleAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.boldSystemFont(ofSize: 14),
+                .foregroundColor: UIColor.black
+            ]
+            "時間帯別 平均騒音レベル".draw(at: CGPoint(x: margin, y: y), withAttributes: sectionTitleAttrs)
+            y += 24
+
+            let chartHeight: CGFloat = 80
+            let barWidth = contentWidth / 24.0
+            let maxDb = hourlyAverages.map(\.averageDecibel).max() ?? 1
+            let chartBaseline = y + chartHeight
+
+            for data in hourlyAverages {
+                let barH = maxDb > 0 ? CGFloat(data.averageDecibel / maxDb) * chartHeight : 0
+                let x = margin + CGFloat(data.hour) * barWidth
+                let rect = CGRect(x: x + 1, y: chartBaseline - barH, width: barWidth - 2, height: max(barH, 1))
+
+                let barColor: UIColor
+                if data.averageDecibel >= 60 { barColor = UIColor(red: 0.93, green: 0.26, blue: 0.26, alpha: 1) }
+                else if data.averageDecibel >= 40 { barColor = UIColor(red: 1.0, green: 0.80, blue: 0.0, alpha: 1) }
+                else { barColor = UIColor(red: 0.18, green: 0.80, blue: 0.44, alpha: 1) }
+
+                barColor.setFill()
+                UIBezierPath(rect: rect).fill()
+            }
+
+            // 時間ラベル
+            y = chartBaseline + 4
+            let hourLabelAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 8),
+                .foregroundColor: UIColor.gray
+            ]
+            for h in stride(from: 0, to: 24, by: 6) {
+                let x = margin + CGFloat(h) * barWidth
+                "\(h)".draw(at: CGPoint(x: x, y: y), withAttributes: hourLabelAttrs)
+            }
+            y += 20
+
+            // 区切り線
+            drawLine(at: y, from: margin, to: pageWidth - margin)
+            y += 16
+
             // 記録一覧テーブルヘッダー
+            "全記録一覧".draw(at: CGPoint(x: margin, y: y), withAttributes: sectionTitleAttrs)
+            y += 24
+
             let headerAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.boldSystemFont(ofSize: 12),
+                .font: UIFont.boldSystemFont(ofSize: 11),
                 .foregroundColor: UIColor.black
             ]
             let headers = ["日時", "dB値", "レベル", "メモ"]
@@ -336,28 +384,24 @@ struct ReportView: View {
                 header.draw(at: CGPoint(x: x, y: y), withAttributes: headerAttrs)
                 x += colWidths[i]
             }
-            y += 20
-
-            // 区切り線
-            let headerLine = UIBezierPath()
-            headerLine.move(to: CGPoint(x: margin, y: y))
-            headerLine.addLine(to: CGPoint(x: pageWidth - margin, y: y))
-            UIColor.lightGray.setStroke()
-            headerLine.stroke()
-            y += 8
+            y += 18
+            drawLine(at: y, from: margin, to: pageWidth - margin)
+            y += 6
 
             // 記録行
             let cellAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 11),
+                .font: UIFont.systemFont(ofSize: 10),
                 .foregroundColor: UIColor.black
             ]
             let dateFormatter = DateFormatter()
             dateFormatter.locale = Locale(identifier: "ja_JP")
             dateFormatter.dateFormat = "M/d HH:mm"
 
-            for record in monthlyRecords {
-                // ページ溢れ処理
-                if y > pageHeight - margin - 30 {
+            let sortedRecords = monthlyRecords.sorted { $0.timestamp < $1.timestamp }
+            for record in sortedRecords {
+                if y > pageHeight - margin - 60 {
+                    // フッター
+                    drawFooter(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin)
                     context.beginPage()
                     y = margin
                 }
@@ -370,13 +414,55 @@ struct ReportView: View {
                     record.memo.isEmpty ? "-" : record.memo
                 ]
                 for (i, cell) in cells.enumerated() {
-                    let rect = CGRect(x: x, y: y, width: colWidths[i] - 4, height: 18)
+                    let rect = CGRect(x: x, y: y, width: colWidths[i] - 4, height: 16)
                     cell.draw(in: rect, withAttributes: cellAttrs)
                     x += colWidths[i]
                 }
-                y += 20
+                y += 18
             }
+
+            y += 20
+
+            // 免責注記
+            if y > pageHeight - margin - 80 {
+                drawFooter(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin)
+                context.beginPage()
+                y = margin
+            }
+
+            let disclaimerAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 9),
+                .foregroundColor: UIColor.gray
+            ]
+            let disclaimer = "本アプリの測定値は参考値です。法的な騒音測定には専門の機器をご使用ください。"
+            disclaimer.draw(in: CGRect(x: margin, y: y, width: contentWidth, height: 30), withAttributes: disclaimerAttrs)
+
+            // 最終ページのフッター
+            drawFooter(context: context, pageWidth: pageWidth, pageHeight: pageHeight, margin: margin)
         }
+    }
+
+    /// 区切り線を描画
+    private func drawLine(at y: CGFloat, from x1: CGFloat, to x2: CGFloat) {
+        let path = UIBezierPath()
+        path.move(to: CGPoint(x: x1, y: y))
+        path.addLine(to: CGPoint(x: x2, y: y))
+        UIColor.lightGray.setStroke()
+        path.lineWidth = 0.5
+        path.stroke()
+    }
+
+    /// フッターを描画
+    private func drawFooter(context: UIGraphicsPDFRendererContext, pageWidth: CGFloat, pageHeight: CGFloat, margin: CGFloat) {
+        let footerAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 8),
+            .foregroundColor: UIColor.gray
+        ]
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "ja_JP")
+        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+        let footer = "騒音ログ / 生成日時: \(dateFormatter.string(from: Date()))"
+        footer.draw(at: CGPoint(x: margin, y: pageHeight - margin + 10), withAttributes: footerAttrs)
     }
 }
 
