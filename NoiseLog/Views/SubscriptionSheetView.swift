@@ -38,8 +38,12 @@ struct SubscriptionSheetView: View {
                                 .fill(AppTheme.cardBackground)
                         )
 
-                        if subscriptionManager.product != nil {
-                            // 価格
+                        if subscriptionManager.isLoadingProduct {
+                            ProgressView()
+                                .tint(AppTheme.accentYellow)
+                                .padding(.vertical, 20)
+                        } else {
+                            // 価格（product取得済みならStoreKit価格、未取得ならフォールバック）
                             Text(priceText)
                                 .font(.title.bold())
                                 .foregroundColor(.white)
@@ -47,9 +51,14 @@ struct SubscriptionSheetView: View {
                             // 購入ボタン
                             Button {
                                 Task {
-                                    await subscriptionManager.purchase()
-                                    if subscriptionManager.isSubscribed {
-                                        dismiss()
+                                    if subscriptionManager.product == nil {
+                                        await subscriptionManager.loadProduct()
+                                    }
+                                    if subscriptionManager.product != nil {
+                                        await subscriptionManager.purchase()
+                                        if subscriptionManager.isSubscribed {
+                                            dismiss()
+                                        }
                                     }
                                 }
                             } label: {
@@ -93,15 +102,6 @@ struct SubscriptionSheetView: View {
                                     .font(.subheadline)
                                     .foregroundColor(AppTheme.accentYellow)
                             }
-                        } else if subscriptionManager.isLoadingProduct {
-                            ProgressView()
-                                .tint(AppTheme.accentYellow)
-                                .padding(.vertical, 20)
-                        } else {
-                            Text("プラン情報はただいま準備中です")
-                                .font(.subheadline)
-                                .foregroundColor(.gray)
-                                .padding(.vertical, 20)
                         }
                     }
                     .padding(.horizontal, 24)
@@ -128,7 +128,7 @@ struct SubscriptionSheetView: View {
         if let product = subscriptionManager.product {
             return "\(product.displayPrice) / 月"
         }
-        return ""
+        return "月額200円"
     }
 
     private func featureRow(icon: String, title: String, description: String) -> some View {

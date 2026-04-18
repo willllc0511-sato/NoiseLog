@@ -20,6 +20,9 @@ struct SettingsView: View {
     /// 通知権限拒否時のアラート
     @State private var showPermissionAlert: Bool = false
 
+    /// 購入シート表示フラグ
+    @State private var showSubscriptionSheet: Bool = false
+
     /// アプリバージョン
     private var appVersion: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
@@ -34,10 +37,8 @@ struct SettingsView: View {
                     .ignoresSafeArea()
 
                 List {
-                    // サブスクリプションセクション（product取得済み or 加入済みの場合のみ表示）
-                    if subscriptionManager.isSubscribed || subscriptionManager.product != nil {
-                        subscriptionSection
-                    }
+                    // サブスクリプションセクション（常に表示）
+                    subscriptionSection
 
                     // 通知設定セクション
                     notificationSection
@@ -77,6 +78,10 @@ struct SettingsView: View {
             } message: {
                 Text("リマインド通知を使うには、設定アプリで通知を許可してください。")
             }
+            .sheet(isPresented: $showSubscriptionSheet) {
+                SubscriptionSheetView()
+                    .environmentObject(subscriptionManager)
+            }
         }
     }
 
@@ -103,9 +108,9 @@ struct SettingsView: View {
                 }
                 .listRowBackground(AppTheme.cardBackground)
             } else {
-                // 未加入：ステータス行もタップで購入可能
+                // 未加入：購入シートを開くボタン
                 Button {
-                    Task { await purchaseOrReload() }
+                    showSubscriptionSheet = true
                 } label: {
                     HStack {
                         HStack(spacing: 12) {
@@ -127,31 +132,19 @@ struct SettingsView: View {
                 }
                 .listRowBackground(AppTheme.cardBackground)
 
-                // 購入ボタン
+                // 購入ボタン（常設・目立つ配色）
                 Button {
-                    Task {
-                        if subscriptionManager.product != nil {
-                            await subscriptionManager.purchase()
-                        } else {
-                            await subscriptionManager.loadProduct()
-                        }
-                    }
+                    showSubscriptionSheet = true
                 } label: {
                     HStack {
                         Spacer()
-                        if subscriptionManager.isPurchasing {
-                            ProgressView()
-                                .tint(.white)
-                        } else {
-                            Text(settingsPriceButtonText)
-                                .font(.headline)
-                                .foregroundColor(.white)
-                        }
+                        Text(settingsPriceButtonText)
+                            .font(.headline)
+                            .foregroundColor(.white)
                         Spacer()
                     }
                     .padding(.vertical, 8)
                 }
-                .disabled(subscriptionManager.isPurchasing)
                 .listRowBackground(AppTheme.accentYellow.opacity(0.9))
 
                 // 復元ボタン
@@ -184,7 +177,7 @@ struct SettingsView: View {
         if let product = subscriptionManager.product {
             return "\(product.displayPrice)/月 で購入"
         }
-        return "購入"
+        return "月額200円 で購入"
     }
 
     /// 購入処理
