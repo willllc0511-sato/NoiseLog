@@ -48,6 +48,15 @@ struct SubscriptionSheetView: View {
                         // 購入ボタン or ローディング or タイムアウト
                         purchaseArea
 
+                        // 購入時のメッセージ（エラー・承認待ち等）
+                        if let message = subscriptionManager.purchaseMessage {
+                            Text(message)
+                                .font(.caption)
+                                .foregroundColor(AppTheme.accentYellow)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 8)
+                        }
+
                         VStack(spacing: 4) {
                             Text("サブスクリプションはいつでもキャンセルできます。")
                                 .font(.caption)
@@ -88,6 +97,7 @@ struct SubscriptionSheetView: View {
             }
         }
         .onAppear {
+            subscriptionManager.purchaseMessage = nil
             Task { await subscriptionManager.loadProduct() }
         }
     }
@@ -97,7 +107,7 @@ struct SubscriptionSheetView: View {
     @ViewBuilder
     private var purchaseArea: some View {
         if subscriptionManager.isLoadingProduct {
-            // 読み込み中：ボタンの位置にローディング表示
+            // 状態1: 読み込み中 — ローディングのみ表示
             HStack {
                 Spacer()
                 ProgressView()
@@ -112,59 +122,13 @@ struct SubscriptionSheetView: View {
                 RoundedRectangle(cornerRadius: 14)
                     .fill(AppTheme.accentYellow.opacity(0.4))
             )
-        } else if subscriptionManager.product == nil && subscriptionManager.loadProductTimedOut {
-            // タイムアウト：エラーメッセージ + 再読み込みボタン
-            VStack(spacing: 12) {
-                Button {
-                    Task {
-                        await subscriptionManager.loadProduct()
-                        if subscriptionManager.product != nil {
-                            await subscriptionManager.purchase()
-                            if subscriptionManager.isSubscribed {
-                                dismiss()
-                            }
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Spacer()
-                        Text("\(priceText)で購入")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        Spacer()
-                    }
-                    .padding(.vertical, 16)
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(AppTheme.accentYellow.opacity(0.9))
-                )
-
-                Text("通信環境をご確認の上、時間をおいて再度お試しください")
-                    .font(.caption)
-                    .foregroundColor(.gray)
-                    .multilineTextAlignment(.center)
-
-                Button {
-                    Task { await subscriptionManager.loadProduct() }
-                } label: {
-                    Text("再読み込み")
-                        .font(.caption)
-                        .foregroundColor(AppTheme.accentYellow)
-                }
-            }
-        } else {
-            // 購入ボタン
+        } else if subscriptionManager.product != nil {
+            // 状態2: 商品取得成功 — 購入ボタンのみ表示
             Button {
                 Task {
-                    if subscriptionManager.product == nil {
-                        await subscriptionManager.loadProduct()
-                    }
-                    if subscriptionManager.product != nil {
-                        await subscriptionManager.purchase()
-                        if subscriptionManager.isSubscribed {
-                            dismiss()
-                        }
+                    await subscriptionManager.purchase()
+                    if subscriptionManager.isSubscribed {
+                        dismiss()
                     }
                 }
             } label: {
@@ -186,6 +150,35 @@ struct SubscriptionSheetView: View {
                     .fill(AppTheme.accentYellow.opacity(0.9))
             )
             .disabled(subscriptionManager.isPurchasing)
+        } else {
+            // 状態3: 商品取得失敗 — エラーメッセージ＋再読み込みのみ表示（購入ボタンなし）
+            VStack(spacing: 12) {
+                Text("商品情報を取得できませんでした")
+                    .font(.subheadline)
+                    .foregroundColor(.white)
+
+                Text("通信環境をご確認の上、時間をおいて再度お試しください")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+
+                Button {
+                    Task { await subscriptionManager.loadProduct() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        Text("再読み込み")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        Spacer()
+                    }
+                    .padding(.vertical, 16)
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(AppTheme.accentYellow.opacity(0.6))
+                )
+            }
         }
     }
 

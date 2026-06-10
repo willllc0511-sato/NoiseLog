@@ -5,6 +5,7 @@ import SwiftData
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var audioManager = AudioManager()
+    @StateObject private var subscriptionManager = SubscriptionManager.shared
 
     /// 録音中のファイルパス
     @State private var currentRecordingURL: URL?
@@ -15,8 +16,13 @@ struct HomeView: View {
     /// 保存フィードバック表示
     @State private var showSavedFeedback: Bool = false
 
-    /// 録音中の最大dB値を記録
-    @State private var peakDecibel: Double = 0
+    /// サブスク未加入時の制限アラート
+    @State private var showSubscriptionAlert: Bool = false
+    /// 購入シート表示フラグ
+    @State private var showSubscriptionSheet: Bool = false
+
+    /// 録音中の最大dB値（AudioManagerから取得）
+    private var peakDecibel: Double { audioManager.peakDecibel }
 
     /// デモ用固定dB値
     private let demoDecibel: Double = 65.0
@@ -46,7 +52,7 @@ struct HomeView: View {
                     .font(.system(size: 96, weight: .bold, design: .rounded))
                     .foregroundColor(AppTheme.colorForDecibel(displayDecibel))
                     .contentTransition(.numericText())
-                    .animation(.easeInOut(duration: 0.15), value: Int(displayDecibel))
+                    .animation(.easeInOut(duration: 0.5), value: Int(displayDecibel))
 
                 Text("dB")
                     .font(.title)
@@ -129,8 +135,7 @@ struct HomeView: View {
         }
         .onChange(of: audioManager.isRecording) { _, recording in
             if recording {
-                // 録音開始：ピーク値リセット、点滅開始
-                peakDecibel = audioManager.currentDecibel
+                // 録音開始：点滅開始
                 withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
                     isBlinking = true
                 }
@@ -142,11 +147,17 @@ struct HomeView: View {
                 autoSaveIfNeeded()
             }
         }
-        .onChange(of: audioManager.currentDecibel) { _, newValue in
-            // 録音中のピークdBを更新
-            if audioManager.isRecording, newValue > peakDecibel {
-                peakDecibel = newValue
+        .alert("ご利用プランが必要です", isPresented: $showSubscriptionAlert) {
+            Button("プランを見る") {
+                showSubscriptionSheet = true
             }
+            Button("閉じる", role: .cancel) {}
+        } message: {
+            Text("録音と記録の保存にはご利用プランへの加入が必要です。")
+        }
+        .sheet(isPresented: $showSubscriptionSheet) {
+            SubscriptionSheetView()
+                .environmentObject(subscriptionManager)
         }
     }
 
@@ -166,7 +177,11 @@ struct HomeView: View {
         if audioManager.isRecording {
             audioManager.stopRecording()
         } else {
-            peakDecibel = audioManager.currentDecibel
+            // サブスク未加入の場合は録音を制限
+            guard subscriptionManager.isSubscribed else {
+                showSubscriptionAlert = true
+                return
+            }
             currentRecordingURL = audioManager.startRecording()
         }
     }

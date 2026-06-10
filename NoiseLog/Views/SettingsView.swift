@@ -12,6 +12,9 @@ struct SettingsView: View {
     @State private var showRestoreAlert: Bool = false
     @State private var restoreAlertMessage: String = ""
 
+    /// サブスクリプション管理（解約）シート表示フラグ
+    @State private var showManageSubscriptions: Bool = false
+
     /// アプリバージョン
     private var appVersion: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
@@ -50,6 +53,7 @@ struct SettingsView: View {
             } message: {
                 Text(restoreAlertMessage)
             }
+            .manageSubscriptionsSheet(isPresented: $showManageSubscriptions)
         }
     }
 
@@ -87,11 +91,32 @@ struct SettingsView: View {
                 }
                 .listRowBackground(AppTheme.accentYellow.opacity(0.9))
             }
+
+            // サブスクリプションの管理・解約（Appleのサブスク管理画面を開く）
+            Button {
+                showManageSubscriptions = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "gearshape")
+                        .foregroundColor(.gray)
+                    Text("サブスクリプションの管理・解約")
+                        .font(.subheadline)
+                        .foregroundColor(.white)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+            }
+            .listRowBackground(AppTheme.cardBackground)
         } header: {
             Text("サブスクリプション")
                 .foregroundColor(.gray)
         } footer: {
-            if !subscriptionManager.isSubscribed {
+            if subscriptionManager.isSubscribed {
+                Text("解約は「サブスクリプションの管理・解約」から行えます。アプリの削除では解約されませんのでご注意ください。")
+                    .foregroundColor(.gray)
+            } else {
                 Text("ご利用プランに加入すると、録音・記録保存の制限が解除されます。")
                     .foregroundColor(.gray)
             }

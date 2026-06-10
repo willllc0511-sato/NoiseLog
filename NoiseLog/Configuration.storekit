@@ -1,0 +1,39 @@
+{
+  "identifier" : "8A3B5C7D-E1F2-4A6B-9C0D-2E3F4A5B6C7D",
+  "type" : "Configuration",
+  "version" : 3,
+  "subscriptionGroups" : [
+    {
+      "id" : "NoiseLogPremium",
+      "localizations" : [
+        {
+          "description" : "騒音ログの全機能が使えるプラン",
+          "displayName" : "NoiseLogPremium",
+          "locale" : "ja"
+        }
+      ],
+      "name" : "NoiseLogPremium",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "200",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "A1B2C3D4",
+          "localizations" : [
+            {
+              "description" : "全機能が使える月額プラン",
+              "displayName" : "月額プラン",
+              "locale" : "ja"
+            }
+          ],
+          "productID" : "com.willllc.NoiseLog.monthly.v2",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "月額プラン",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ]
+}

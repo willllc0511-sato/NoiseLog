@@ -1,8 +1,15 @@
 import SwiftUI
 
+// MARK: - Notification Names
+
+extension Notification.Name {
+    /// サブスクリプション設定画面を開く通知
+    static let openSubscriptionSettings = Notification.Name("openSubscriptionSettings")
+}
+
 /// スクリーンショット用デモモード（撮影後にfalseに戻す）
 enum DemoMode {
-    static let isEnabled: Bool = true
+    static let isEnabled: Bool = false
 }
 
 /// アプリ全体のテーマカラー定義
