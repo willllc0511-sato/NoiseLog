@@ -176,7 +176,7 @@ struct SettingsView: View {
             }
             .listRowBackground(AppTheme.cardBackground)
 
-            Link(destination: URL(string: "mailto:support@will-llc.co.jp?subject=騒音ログ お問い合わせ")!) {
+            Link(destination: URL(string: "mailto:support@will0511.com?subject=騒音ログ お問い合わせ")!) {
                 HStack(spacing: 12) {
                     Image(systemName: "envelope.fill")
                         .foregroundColor(AppTheme.accentYellow)
