@@ -164,7 +164,7 @@ final class AudioManager: ObservableObject {
         return documentsPath.appendingPathComponent(fileName)
     }
 
-    /// 録音を開始する（最大60秒で自動停止）
+    /// 録音を開始する（最大300秒で自動停止）
     func startRecording() -> URL? {
         guard permissionGranted else { return nil }
 

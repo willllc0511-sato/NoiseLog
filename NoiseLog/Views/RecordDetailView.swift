@@ -1,15 +1,56 @@
 import SwiftUI
 import AVFoundation
 
+/// 録音の再生を管理する。再生完了時に自動的に停止状態へ戻し、
+/// マナーモード（サイレントスイッチON）でも再生できるよう再生用セッションを設定する。
+final class RecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    /// 再生中かどうか
+    @Published var isPlaying: Bool = false
+
+    private var player: AVAudioPlayer?
+
+    /// 指定した録音ファイルを再生する
+    func play(fileName: String) {
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let fileURL = documentsPath.appendingPathComponent(fileName)
+
+        do {
+            // サイレントスイッチがONでも再生されるよう再生用セッションに切り替える
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default)
+            try session.setActive(true)
+
+            let player = try AVAudioPlayer(contentsOf: fileURL)
+            player.delegate = self
+            player.play()
+            self.player = player
+            isPlaying = true
+        } catch {
+            // ファイル再生エラー
+            isPlaying = false
+        }
+    }
+
+    /// 再生を停止する
+    func stop() {
+        player?.stop()
+        player = nil
+        isPlaying = false
+    }
+
+    /// 再生が最後まで完了したときに呼ばれる
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        self.player = nil
+        isPlaying = false
+    }
+}
+
 /// 記録詳細画面：個別の騒音記録の詳細を表示・メモ編集
 struct RecordDetailView: View {
     @Bindable var record: NoiseRecord
 
-    /// 音声再生中かどうか
-    @State private var isPlaying: Bool = false
-
-    /// オーディオプレーヤー
-    @State private var audioPlayer: AVAudioPlayer?
+    /// 音声再生の管理
+    @StateObject private var player = RecordingPlayer()
 
     /// メモ編集中かどうか
     @State private var isEditingMemo: Bool = false
@@ -46,6 +87,9 @@ struct RecordDetailView: View {
         .navigationTitle("記録詳細")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .onDisappear {
+            player.stop()
+        }
     }
 
     // MARK: - デシベルカード
@@ -132,11 +176,11 @@ struct RecordDetailView: View {
     private var audioCard: some View {
         Button(action: togglePlayback) {
             HStack {
-                Image(systemName: isPlaying ? "stop.circle.fill" : "play.circle.fill")
+                Image(systemName: player.isPlaying ? "stop.circle.fill" : "play.circle.fill")
                     .font(.system(size: 32))
                     .foregroundColor(AppTheme.accentYellow)
 
-                Text(isPlaying ? "再生停止" : "録音を再生")
+                Text(player.isPlaying ? "再生停止" : "録音を再生")
                     .font(.headline)
                     .foregroundColor(.white)
 
@@ -150,21 +194,11 @@ struct RecordDetailView: View {
 
     /// 音声の再生/停止を切り替える
     private func togglePlayback() {
-        if isPlaying {
-            audioPlayer?.stop()
-            isPlaying = false
+        if player.isPlaying {
+            player.stop()
         } else {
             guard let fileName = record.audioFilePath else { return }
-            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let fileURL = documentsPath.appendingPathComponent(fileName)
-
-            do {
-                audioPlayer = try AVAudioPlayer(contentsOf: fileURL)
-                audioPlayer?.play()
-                isPlaying = true
-            } catch {
-                // ファイル再生エラー
-            }
+            player.play(fileName: fileName)
         }
     }
 }
